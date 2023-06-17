@@ -99,4 +99,50 @@ void* manejoConexion(void* args) {
         }
     }
 
-   
+    close(socket);
+    return NULL;
+}
+
+int main() {
+    char command[MAX_COMMAND_LENGTH];
+
+    while (1) {
+        printf("\nIngrese un comando: ");
+        fgets(command, MAX_COMMAND_LENGTH, stdin);
+
+        command[strcspn(command, "\n")] = '\0';
+
+        if (strncmp(command, "quit", 4) == 0) {
+            break;
+        } else if (strncmp(command, "open", 4) == 0) {
+            char serverIP[16];
+            sscanf(command, "open %15s", serverIP);
+            int socket = establecerConexion(serverIP);
+            if (socket != -1) {
+                pthread_t hilo;
+                int* socketPtr = malloc(sizeof(int));
+                *socketPtr = socket;
+                if (pthread_create(&hilo, NULL, manejoConexion, (void*)socketPtr) != 0) {
+                    perror("Error creando el hilo");
+                    break;
+                }
+            }
+        } else if (strncmp(command, "lcd", 3) == 0 && strlen(command) > 4 && command[3] == ' ') {
+            // Extraer la ruta del directorio local del comando
+            strcpy(localDirectory, command + 4);
+
+            // Cambiar el directorio local usando chdir()
+            if (chdir(localDirectory) == -1) {
+                perror("Error al cambiar el directorio local");
+            } else {
+                printf("Directorio local cambiado a: %s\n", localDirectory);
+            }
+        } else {
+            printf("Comando no reconocido. Los comandos permitidos y válidos son:\n");
+        }
+    }
+
+    printf("Saliendo del cliente FTP.\n");
+
+    return 0;
+}
