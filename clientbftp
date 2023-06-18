@@ -1,0 +1,233 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+
+#define MAX_COMMAND_LENGTH 100
+#define MAX_RESPONSE_LENGTH 1024
+#define SERVER_PORT 8889
+#define BUFFER_SIZE 1024
+
+// Función para establecer la conexión con otro peer
+int establecerConexion(const char* peerIP) {
+    int socketDescriptor;
+    struct sockaddr_in serverAddress;
+
+    // Crear un socket
+    socketDescriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (socketDescriptor == -1) {
+        perror("Error creando el socket");
+        return -1;
+    }
+
+    // Configurar la dirección del servidor
+    serverAddress.sin_family = AF_INET;
+    serverAddress.sin_addr.s_addr = inet_addr(peerIP);
+    serverAddress.sin_port = htons(SERVER_PORT);
+
+    // Conectar al servidor
+    if (connect(socketDescriptor, (struct sockaddr*)&serverAddress, sizeof(serverAddress)) == -1) {
+        perror("Error al conectar al servidor");
+        return -1;
+    }
+
+    printf("Conexión exitosa con el peer %s\n", peerIP);
+
+    return socketDescriptor;
+}
+
+void enviar_archivo(int socket, const char *nombre_archivo) {
+   FILE *archivo;
+   char buffer[BUFFER_SIZE];
+   ssize_t bytes_leidos, bytes_enviados;
+
+
+   archivo = fopen(nombre_archivo, "rb");
+   if (archivo == NULL) {
+       perror("Error al abrir el archivo");
+       exit(1);
+   }
+
+
+   // Leer y enviar fragmentos del archivo hasta que se llegue al final
+   while ((bytes_leidos = fread(buffer, 1, BUFFER_SIZE, archivo)) > 0) {
+       bytes_enviados = send(socket, buffer, bytes_leidos, 0);
+       if (bytes_enviados < 0) {
+           perror("Error al enviar los datos a través del socket");
+           exit(1);
+       }
+   }
+
+
+   fclose(archivo);
+}
+
+
+void recibir_archivo(int socket, const char *nombre_archivo) {
+   FILE *archivo;
+   char buffer[BUFFER_SIZE];
+   ssize_t bytes_recibidos, bytes_escritos;
+
+
+   archivo = fopen(nombre_archivo, "wb");
+   if (archivo == NULL) {
+       perror("Error al crear el archivo");
+       exit(1);
+   }
+
+
+   // Recibir y escribir fragmentos del archivo hasta que se llegue al final
+   while ((bytes_recibidos = recv(socket, buffer, BUFFER_SIZE, 0)) > 0) {
+       bytes_escritos = fwrite(buffer, 1, bytes_recibidos, archivo);
+       if (bytes_escritos < bytes_recibidos) {
+           perror("Error al escribir los datos en el archivo");
+           exit(1);
+       }
+   }
+
+
+   fclose(archivo);
+}
+
+
+// Función para procesar el comando "cd" en el servidor
+void procesarComandoCD(int socket, const char* directory) {
+    char command[MAX_COMMAND_LENGTH];
+    snprintf(command, MAX_COMMAND_LENGTH, "cd %s", directory);
+    if (send(socket, command, strlen(command), 0) == -1) {
+        perror("Error al enviar el comando al servidor");
+        return;
+    }
+
+    // Recibir la respuesta del servidor
+    char response[MAX_RESPONSE_LENGTH];
+    ssize_t bytesRead = recv(socket, response, MAX_RESPONSE_LENGTH - 1, 0);
+    if (bytesRead == -1) {
+        perror("Error al recibir la respuesta del servidor");
+        return;
+    }
+    response[bytesRead] = '\0';
+
+    // Imprimir la respuesta del servidor
+    printf("Respuesta del servidor: %s\n", response);
+}
+
+// Función para procesar el comando "lcd" en el cliente (cambio de directorio local)
+void procesarComandoLCD(const char* directory) {
+    if (chdir(directory) == -1) {
+        perror("Error al cambiar el directorio local");
+        return;
+    }
+
+    printf("Directorio local cambiado a: %s\n", directory);
+}
+
+// Función para procesar el comando "pwd" en el servidor
+void procesarComandoPWD(int socket) {
+    char command[] = "pwd";
+    if (send(socket, command, strlen(command), 0) == -1) {
+        perror("Error al enviar el comando al servidor");
+        return;
+    }
+
+    // Recibir la respuesta del servidor
+    char response[MAX_RESPONSE_LENGTH];
+    ssize_t bytesRead = recv(socket, response, MAX_RESPONSE_LENGTH - 1, 0);
+    if (bytesRead == -1) {
+        perror("Error al recibir la respuesta del servidor");
+        return;
+    }
+    response[bytesRead] = '\0';
+
+    // Imprimir la respuesta del servidor
+    printf("Directorio activo remoto: %s\n", response);
+}
+
+
+typedef struct {
+    int socket;
+    struct sockaddr_in address;
+} PeerInfo;
+
+void* manejoConexion(void* args) {
+    int socket = *((int*)args);
+    free(args);
+
+    char command[MAX_COMMAND_LENGTH];
+
+    while (1) {
+        printf("\nIngrese un comando remoto: ");
+        fgets(command, MAX_COMMAND_LENGTH, stdin);
+
+        command[strcspn(command, "\n")] = '\0';
+
+        if (strcmp(command, "close") == 0) {
+            break;
+        } else if (strcmp(command, "get") == 0) {
+            recibir_archivo(socket, "Archivo");
+        } else if (strcmp(command, "put") == 0) {
+            enviar_archivo(socket, "Archivo");
+        } else if (strncmp(command, "cd", 2) == 0 && strlen(command) > 3 && command[2] == ' ') {
+            // Extraer la ruta del directorio del comando
+            char directory[MAX_COMMAND_LENGTH];
+            strcpy(directory, command + 3);
+
+            // Procesar el comando "cd" en el servidor
+            procesarComandoCD(socket, directory);
+        } else if (strcmp(command, "pwd") == 0) {
+            // Procesar el comando "pwd" en el servidor
+            procesarComandoPWD(socket);
+        } else if (strncmp(command, "lcd", 3) == 0 && strlen(command) > 4 && command[3] == ' ') {
+            // Extraer la ruta del directorio del comando
+            char directory[MAX_COMMAND_LENGTH];
+            strcpy(directory, command + 4);
+
+            // Procesar el comando "lcd" en el cliente (cambio de directorio local)
+            procesarComandoLCD(directory);
+        }
+
+        //procesarComando(socket, command);
+    }
+
+    close(socket);
+    return NULL;
+}
+
+int main() {
+    char command[MAX_COMMAND_LENGTH];
+
+    while (1) {
+        printf("\nIngrese un comando:    ");
+        fgets(command, MAX_COMMAND_LENGTH, stdin);
+
+        command[strcspn(command, "\n")] = '\0';
+
+        if (strncmp(command, "quit", 4) == 0) {
+            break;
+        } else if (strncmp(command, "open", 4) == 0) {
+            char serverIP[16];
+            sscanf(command, "open %15s", serverIP);
+            int socket = establecerConexion(serverIP);
+            if (socket != -1) {
+                pthread_t hilo;
+                int* socketPtr = malloc(sizeof(int));
+                *socketPtr = socket;
+                if (pthread_create(&hilo, NULL, manejoConexion, (void*)socketPtr) != 0) {
+                    perror("Error creando el hilo");
+                    break;
+                }
+            }
+        } else {
+            printf("Comando no reconocido. Los comandos permitidos y válidos son:\n");
+            printf("  - quit\n");
+            printf("  - open <server IP>\n");
+        }
+    }
+    printf("Saliendo del cliente FTP.\n");
+
+    return 0;
+}
+
