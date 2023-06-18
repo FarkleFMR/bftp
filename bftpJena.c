@@ -105,6 +105,7 @@ void* manejoConexion(void* args) {
 
 int main() {
     char command[MAX_COMMAND_LENGTH];
+    char localDirectory[MAX_COMMAND_LENGTH];
 
     while (1) {
         printf("\nIngrese un comando: ");
@@ -139,6 +140,9 @@ int main() {
             }
         } else {
             printf("Comando no reconocido. Los comandos permitidos y válidos son:\n");
+            printf("quit: Salir del cliente FTP.\n");
+            printf("open <IP>: Establecer conexión con el servidor FTP en la dirección IP especificada.\n");
+            printf("lcd <directorio>: Cambiar el directorio local del cliente FTP.\n");
         }
     }
 
